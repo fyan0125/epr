@@ -889,10 +889,17 @@ def reader(stdscr, ebook, index, width, y, pctg):
 
     # Colorize keywords in work mode to mimic terminal logs while keeping text readable.
     if WORKMODE:
+        def paint_highlight(line_no, start, length):
+            try:
+                seg = src_lines[line_no][start:start+length]
+                pad.addstr(line_no, start, seg, HIGHLIGHT_ATTR)
+            except curses.error:
+                pass
+
         for n, line in enumerate(src_lines):
             for kw in WORKKEYWORDS:
                 for m in re.finditer(re.escape(kw), line, re.IGNORECASE):
-                    pad.chgat(n, m.start(), len(m.group()), HIGHLIGHT_ATTR)
+                    paint_highlight(n, m.start(), len(m.group()))
 
         # Even without --work-keys, randomly highlight some words for camouflage effect.
         random_candidates = []
@@ -903,7 +910,7 @@ def reader(stdscr, ebook, index, width, y, pctg):
             rng = random.Random("{}:{}:{}".format(chpath, width, totlines))
             sample_size = min(24, max(8, totlines // 10), len(random_candidates))
             for n, start, length in rng.sample(random_candidates, sample_size):
-                pad.chgat(n, start, length, HIGHLIGHT_ATTR)
+                paint_highlight(n, start, length)
     if index == 0:
         suff = "     End --> "
     elif index == len(contents) - 1:
@@ -1194,7 +1201,7 @@ def preread(stdscr, file):
         curses.init_pair(4, 203, -1)
         curses.init_pair(5, 250, 238)
         COLORSUPPORT = True
-        HIGHLIGHT_ATTR = curses.color_pair(4) | curses.A_BOLD
+        HIGHLIGHT_ATTR = curses.color_pair(4) | curses.A_BOLD | curses.A_REVERSE
         WORKPANEL_ATTR = curses.color_pair(5)
     except:
         COLORSUPPORT  = False
