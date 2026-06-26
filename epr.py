@@ -10,6 +10,9 @@ Usages:
 Options:
     -r              print reading history
     -d              dump epub
+    -w, --work      enable work camouflage mode
+    --work-keys=K1,K2,...
+                    highlight comma-separated keywords in work mode
     -h, --help      print short, long help
 
 Key Binding:
@@ -38,6 +41,7 @@ Key Binding:
     Mark pos to n    : b[n]
     Jump to pos n    : `[n]
     Switch colorsch  : [default=0, dark=1, light=2]c
+    Toggle work mode : w
 """
 
 
@@ -58,6 +62,7 @@ import json
 import tempfile
 import shutil
 import subprocess
+from datetime import datetime
 import xml.etree.ElementTree as ET
 from urllib.parse import unquote
 from html import unescape
@@ -106,6 +111,9 @@ COLORSUPPORT = False
 SEARCHPATTERN = None
 VWR = None
 JUMPLIST = {}
+WORKMODE = False
+WORKKEYWORDS = ["TODO", "FIXME", "URGENT", "ERROR", "BLOCKER", "DEPLOY", "PROD"]
+WORKPANELHEIGHT = 4
 
 
 class Epub:
@@ -836,6 +844,7 @@ def searching(stdscr, pad, src, width, y, ch, tot):
 
 
 def reader(stdscr, ebook, index, width, y, pctg):
+    global WORKMODE
     k = 0 if SEARCHPATTERN is None else ord("/")
     rows, cols = stdscr.getmaxyx()
     x = (cols - width) // 2
@@ -870,10 +879,17 @@ def reader(stdscr, ebook, index, width, y, pctg):
 
     pad.keypad(True)
     for n, i in enumerate(src_lines):
-        if re.search("\[IMG:[0-9]+\]", i):
+        if re.search(r"\[IMG:[0-9]+\]", i):
             pad.addstr(n, width//2 - len(i)//2, i, curses.A_REVERSE)
         else:
             pad.addstr(n, 0, i)
+
+    # Colorize keywords in work mode to mimic terminal logs while keeping text readable.
+    if WORKMODE and COLORSUPPORT and WORKKEYWORDS:
+        for n, line in enumerate(src_lines):
+            for kw in WORKKEYWORDS:
+                for m in re.finditer(re.escape(kw), line, re.IGNORECASE):
+                    pad.chgat(n, m.start(), len(m.group()), curses.color_pair(4) | curses.A_BOLD)
     if index == 0:
         suff = "     End --> "
     elif index == len(contents) - 1:
@@ -886,11 +902,37 @@ def reader(stdscr, ebook, index, width, y, pctg):
     except curses.error:
         pass
 
+    def draw_work_panel():
+        if not WORKMODE:
+            return
+        now = datetime.now().strftime("%H:%M:%S")
+        panel_top = rows - WORKPANELHEIGHT
+        fake_lines = [
+            "[{}] INFO  task-runner    sync worker heartbeat ok".format(now),
+            "[{}] WARN  queue-monitor  pending jobs: {}".format(now, (index + 1) * 3 + (y % 7)),
+            "[{}] INFO  ci-agent       chapter={}/{} offset={}".format(
+                now, index + 1, len(contents), max(y, 0)
+            ),
+        ]
+        for i in range(WORKPANELHEIGHT):
+            try:
+                stdscr.addstr(panel_top + i, 0, " " * cols, curses.color_pair(5))
+            except curses.error:
+                pass
+        for i, line in enumerate(fake_lines):
+            try:
+                stdscr.addstr(panel_top + i, 0, line[:cols-1], curses.color_pair(5))
+            except curses.error:
+                pass
+
     stdscr.clear()
     stdscr.refresh()
     # try except to be more flexible on terminal resize
+    view_bottom = rows - 1 if not WORKMODE else rows - WORKPANELHEIGHT - 1
     try:
-        pad.refresh(y,0, 0,x, rows-1,x+width)
+        pad.refresh(y,0, 0,x, view_bottom,x+width)
+        draw_work_panel()
+        stdscr.refresh()
     except curses.error:
         pass
 
@@ -1025,7 +1067,7 @@ def reader(stdscr, ebook, index, width, y, pctg):
             elif k == ord("o") and VWR is not None:
                 gambar, idx = [], []
                 for n, i in enumerate(src_lines[y:y+rows]):
-                    img = re.search("(?<=\[IMG:)[0-9]+(?=\])", i)
+                    img = re.search(r"(?<=\[IMG:)[0-9]+(?=\])", i)
                     if img is not None:
                         gambar.append(img.group())
                         idx.append(n)
@@ -1080,6 +1122,9 @@ def reader(stdscr, ebook, index, width, y, pctg):
                     count_color = count
                 stdscr.bkgd(curses.color_pair(count_color+1))
                 return 0, width, y, None
+            elif k == ord("w"):
+                WORKMODE = not WORKMODE
+                return 0, width, y, None
             elif k == curses.KEY_RESIZE:
                 savestate(ebook.path, index, width, y, y/totlines)
                 # stated in pypi windows-curses page:
@@ -1104,10 +1149,16 @@ def reader(stdscr, ebook, index, width, y, pctg):
             stdscr.clear()
             stdscr.addstr(0, 0, countstring)
             stdscr.refresh()
-            if totlines - y < rows:
+            if WORKMODE:
+                view_rows = rows - WORKPANELHEIGHT
+            else:
+                view_rows = rows
+            if totlines - y < view_rows:
                 pad.refresh(y,0, 0,x, totlines-y,x+width)
             else:
-                pad.refresh(y,0, 0,x, rows-1,x+width)
+                pad.refresh(y,0, 0,x, view_rows-1,x+width)
+            draw_work_panel()
+            stdscr.refresh()
         except curses.error:
             pass
         k = pad.getch()
@@ -1125,6 +1176,8 @@ def preread(stdscr, file):
         curses.init_pair(1, -1, -1)
         curses.init_pair(2, DARK[0], DARK[1])
         curses.init_pair(3, LIGHT[0], LIGHT[1])
+        curses.init_pair(4, 203, -1)
+        curses.init_pair(5, 250, 238)
         COLORSUPPORT = True
     except:
         COLORSUPPORT  = False
@@ -1170,6 +1223,8 @@ def main():
     if sys.argv[1:] != []:
         args += sys.argv[1:]
 
+    global WORKMODE, WORKKEYWORDS
+
     if len({"-h", "--help"} & set(args)) != 0:
         hlp = __doc__.rstrip()
         if "-h" in args:
@@ -1189,6 +1244,16 @@ def main():
         dump = True
     else:
         dump = False
+
+    if len({"-w", "--work"} & set(args)) != 0:
+        WORKMODE = True
+        args = [a for a in args if a not in {"-w", "--work"}]
+
+    custom_work_keys = [a for a in args if a.startswith("--work-keys=")]
+    if custom_work_keys:
+        args = [a for a in args if not a.startswith("--work-keys=")]
+        raw = custom_work_keys[-1].split("=", 1)[1]
+        WORKKEYWORDS = [k.strip() for k in raw.split(",") if k.strip()]
 
     loadstate()
 

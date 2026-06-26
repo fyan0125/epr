@@ -127,6 +127,32 @@ To see available values assigned to colors, you can run this one-liner on bash:
 $ i=0; for j in {1..16}; do for k in {1..16}; do printf "\e[1;48;05;${i}m %03d \e[0m" $i; i=$((i+1)); done; echo; done
 ```
 
+## Work Camouflage Mode
+
+Enable a work-like terminal overlay and keyword highlighting:
+
+```shell
+$ epr --work book.epub
+```
+
+or:
+
+```shell
+$ epr -w book.epub
+```
+
+When work mode is on:
+
+- Press `w` to toggle it during reading
+- A fake terminal activity panel is shown at the bottom
+- Keywords are highlighted in a separate color
+
+You can customize highlighted keywords:
+
+```shell
+$ epr --work --work-keys=todo,urgent,deploy,prod,error book.epub
+```
+
 ## Known Issues
 
 1. Search function can't find occurrences that span across multiple lines
