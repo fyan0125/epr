@@ -154,6 +154,15 @@ You can customize highlighted keywords:
 $ epr --work --work-keys=todo,urgent,deploy,prod,error book.epub
 ```
 
+You can also open/edit options config with:
+
+```shell
+$ epr --options
+```
+
+It will open `~/.config/epr/options.json` (or `~/.epr/options.json` when `~/.config` is unavailable).  
+You can customize work-mode colors there.
+
 ## Known Issues
 
 1. Search function can't find occurrences that span across multiple lines

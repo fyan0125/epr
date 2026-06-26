@@ -11,6 +11,7 @@ Options:
     -r              print reading history
     -d              dump epub
     -w, --work      enable work camouflage mode
+    --options       open options config file in editor
     --work-keys=K1,K2,...
                     highlight comma-separated keywords in work mode
     -h, --help      print short, long help
@@ -117,6 +118,19 @@ WORKKEYWORDS = ["TODO", "FIXME", "URGENT", "ERROR", "BLOCKER", "DEPLOY", "PROD"]
 WORKPANELHEIGHT = 4
 HIGHLIGHT_ATTR = curses.A_BOLD | curses.A_REVERSE
 WORKPANEL_ATTR = curses.A_REVERSE
+OPTIONSCONFIG = ""
+OPTIONS = {
+    "colors": {
+        "dark_fg": 252,
+        "dark_bg": 235,
+        "light_fg": 239,
+        "light_bg": 223,
+        "highlight_fg": 203,
+        "highlight_bg": -1,
+        "panel_fg": 250,
+        "panel_bg": 238
+    }
+}
 
 
 class Epub:
@@ -365,6 +379,60 @@ def loadstate():
     if os.path.exists(STATEFILE):
         with open(STATEFILE, "r") as f:
             STATE = json.load(f)
+
+
+def _default_config_dir():
+    home = os.getenv("HOME")
+    if home is not None:
+        if os.path.isdir(os.path.join(home, ".config")):
+            return os.path.join(home, ".config", "epr")
+        return os.path.join(home, ".epr")
+    profile = os.getenv("USERPROFILE")
+    if profile is not None:
+        return profile
+    return "."
+
+
+def loadoptions():
+    global OPTIONSCONFIG, OPTIONS, DARK, LIGHT
+    configdir = _default_config_dir()
+    os.makedirs(configdir, exist_ok=True)
+    OPTIONSCONFIG = os.path.join(configdir, "options.json")
+
+    if not os.path.exists(OPTIONSCONFIG):
+        with open(OPTIONSCONFIG, "w") as f:
+            json.dump(OPTIONS, f, indent=2)
+        return
+
+    try:
+        with open(OPTIONSCONFIG, "r") as f:
+            user_options = json.load(f)
+    except Exception:
+        return
+
+    if isinstance(user_options, dict) and isinstance(user_options.get("colors"), dict):
+        colors = user_options["colors"]
+        for key in OPTIONS["colors"].keys():
+            if key in colors:
+                OPTIONS["colors"][key] = colors[key]
+
+    DARK = (OPTIONS["colors"]["dark_fg"], OPTIONS["colors"]["dark_bg"])
+    LIGHT = (OPTIONS["colors"]["light_fg"], OPTIONS["colors"]["light_bg"])
+
+
+def open_options_editor():
+    loadoptions()
+    if sys.platform == "win32":
+        editor_cmd = ["notepad", OPTIONSCONFIG]
+    else:
+        editor = os.getenv("EDITOR")
+        if editor:
+            editor_cmd = [editor, OPTIONSCONFIG]
+        elif shutil.which("nano") is not None:
+            editor_cmd = ["nano", OPTIONSCONFIG]
+        else:
+            editor_cmd = ["vi", OPTIONSCONFIG]
+    subprocess.call(editor_cmd)
 
 
 def savestate(file, index, width, pos, pctg ):
@@ -1198,8 +1266,8 @@ def preread(stdscr, file):
         curses.init_pair(1, -1, -1)
         curses.init_pair(2, DARK[0], DARK[1])
         curses.init_pair(3, LIGHT[0], LIGHT[1])
-        curses.init_pair(4, 203, -1)
-        curses.init_pair(5, 250, 238)
+        curses.init_pair(4, OPTIONS["colors"]["highlight_fg"], OPTIONS["colors"]["highlight_bg"])
+        curses.init_pair(5, OPTIONS["colors"]["panel_fg"], OPTIONS["colors"]["panel_bg"])
         COLORSUPPORT = True
         HIGHLIGHT_ATTR = curses.color_pair(4) | curses.A_BOLD | curses.A_REVERSE
         WORKPANEL_ATTR = curses.color_pair(5)
@@ -1265,6 +1333,10 @@ def main():
         print(__url__)
         sys.exit()
 
+    if "--options" in args:
+        open_options_editor()
+        sys.exit()
+
     if len({"-d"} & set(args)) != 0:
         args.remove("-d")
         dump = True
@@ -1282,6 +1354,7 @@ def main():
         WORKKEYWORDS = [k.strip() for k in raw.split(",") if k.strip()]
 
     loadstate()
+    loadoptions()
 
     if args == []:
         file, todel = False, []
