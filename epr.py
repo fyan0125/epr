@@ -462,7 +462,7 @@ def _translate_one(text, target="zh-TW", source="auto"):
     return translated
 
 
-def translate_lines_cached(lines):
+def translate_lines_cached(lines, progress_cb=None):
     trans = []
     for i in lines:
         key = i.strip()
@@ -474,6 +474,11 @@ def translate_lines_cached(lines):
             trans.append(None)
 
     missing_idx = [n for n, i in enumerate(trans) if i is None]
+    done = 0
+    total = len(missing_idx)
+    if progress_cb is not None and total > 0:
+        progress_cb(done, total)
+
     for start in range(0, len(missing_idx), 20):
         idx_chunk = missing_idx[start:start+20]
         src_chunk = [lines[i].strip() for i in idx_chunk]
@@ -485,15 +490,18 @@ def translate_lines_cached(lines):
             line_key = lines[idx_chunk[j]].strip()
             TRANSLATE_CACHE[line_key] = txt
             trans[idx_chunk[j]] = txt
+            done += 1
+            if progress_cb is not None:
+                progress_cb(done, total)
 
     return [i if i is not None else "" for i in trans]
 
 
-def build_display_lines(src_lines, width):
+def build_display_lines(src_lines, width, progress_cb=None):
     if not TRANSLATE_MODE or width < 40:
         return src_lines
     col = (width - 3) // 2
-    translated = translate_lines_cached(src_lines)
+    translated = translate_lines_cached(src_lines, progress_cb)
     display = []
     for left, right in zip(src_lines, translated):
         if left.strip() == "":
@@ -996,6 +1004,16 @@ def reader(stdscr, ebook, index, width, y, pctg):
     content = ebook.file.open(chpath).read()
     content = content.decode("utf-8")
 
+    def draw_translate_progress(done, total):
+        rows, cols = stdscr.getmaxyx()
+        msg = " Translating... {}/{} ".format(done, total)
+        try:
+            stdscr.addstr(rows-1, 0, " " * (cols - 1), curses.A_REVERSE)
+            stdscr.addstr(rows-1, 0, msg[:cols-1], curses.A_REVERSE)
+            stdscr.refresh()
+        except curses.error:
+            pass
+
     parser = HTMLtoLines()
     try:
         parser.feed(content)
@@ -1005,7 +1023,11 @@ def reader(stdscr, ebook, index, width, y, pctg):
 
     text_width = width if not TRANSLATE_MODE or width < 40 else (width - 3) // 2
     src_lines, imgs = parser.get_lines(text_width)
-    display_lines = build_display_lines(src_lines, width)
+    display_lines = build_display_lines(
+        src_lines,
+        width,
+        draw_translate_progress if TRANSLATE_MODE else None
+    )
     totlines = len(src_lines)
 
     if y < 0 and totlines <= rows:
