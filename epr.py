@@ -124,6 +124,7 @@ HIGHLIGHT_ATTR = curses.A_BOLD | curses.A_REVERSE
 WORKPANEL_ATTR = curses.A_REVERSE
 TRANSLATE_MODE = False
 TRANSLATE_CACHE = {}
+PENDING_KEY = None
 OPTIONSCONFIG = ""
 OPTIONS = {
     "colors": {
@@ -462,7 +463,7 @@ def _translate_one(text, target="zh-TW", source="auto"):
     return translated
 
 
-def translate_lines_cached(lines, progress_cb=None):
+def translate_lines_cached(lines, progress_cb=None, abort_cb=None):
     trans = []
     for i in lines:
         key = i.strip()
@@ -480,9 +481,13 @@ def translate_lines_cached(lines, progress_cb=None):
         progress_cb(done, total)
 
     for start in range(0, len(missing_idx), 20):
+        if abort_cb is not None and abort_cb():
+            break
         idx_chunk = missing_idx[start:start+20]
         src_chunk = [lines[i].strip() for i in idx_chunk]
         for j, source in enumerate(src_chunk):
+            if abort_cb is not None and abort_cb():
+                break
             try:
                 txt = _translate_one(source)
             except Exception:
@@ -493,15 +498,17 @@ def translate_lines_cached(lines, progress_cb=None):
             done += 1
             if progress_cb is not None:
                 progress_cb(done, total)
+        if abort_cb is not None and abort_cb():
+            break
 
     return [i if i is not None else "" for i in trans]
 
 
-def build_display_lines(src_lines, width, progress_cb=None):
+def build_display_lines(src_lines, width, progress_cb=None, abort_cb=None):
     if not TRANSLATE_MODE or width < 40:
         return src_lines
     col = (width - 3) // 2
-    translated = translate_lines_cached(src_lines, progress_cb)
+    translated = translate_lines_cached(src_lines, progress_cb, abort_cb)
     display = []
     for left, right in zip(src_lines, translated):
         if left.strip() == "":
@@ -993,8 +1000,7 @@ def searching(stdscr, pad, src, width, y, ch, tot):
 
 
 def reader(stdscr, ebook, index, width, y, pctg):
-    global WORKMODE, TRANSLATE_MODE
-    k = 0 if SEARCHPATTERN is None else ord("/")
+    global WORKMODE, TRANSLATE_MODE, PENDING_KEY
     rows, cols = stdscr.getmaxyx()
     x = (cols - width) // 2
 
@@ -1006,13 +1012,21 @@ def reader(stdscr, ebook, index, width, y, pctg):
 
     def draw_translate_progress(done, total):
         rows, cols = stdscr.getmaxyx()
-        msg = " Translating... {}/{} ".format(done, total)
+        msg = " Translating... {}/{} (press any key to interrupt) ".format(done, total)
         try:
             stdscr.addstr(rows-1, 0, " " * (cols - 1), curses.A_REVERSE)
             stdscr.addstr(rows-1, 0, msg[:cols-1], curses.A_REVERSE)
             stdscr.refresh()
         except curses.error:
             pass
+
+    def should_abort_translate():
+        global PENDING_KEY
+        ch = stdscr.getch()
+        if ch == -1:
+            return False
+        PENDING_KEY = ch
+        return True
 
     parser = HTMLtoLines()
     try:
@@ -1023,11 +1037,18 @@ def reader(stdscr, ebook, index, width, y, pctg):
 
     text_width = width if not TRANSLATE_MODE or width < 40 else (width - 3) // 2
     src_lines, imgs = parser.get_lines(text_width)
-    display_lines = build_display_lines(
-        src_lines,
-        width,
-        draw_translate_progress if TRANSLATE_MODE else None
-    )
+    if TRANSLATE_MODE:
+        stdscr.nodelay(True)
+    try:
+        display_lines = build_display_lines(
+            src_lines,
+            width,
+            draw_translate_progress if TRANSLATE_MODE else None,
+            should_abort_translate if TRANSLATE_MODE else None
+        )
+    finally:
+        if TRANSLATE_MODE:
+            stdscr.nodelay(False)
     totlines = len(src_lines)
 
     if y < 0 and totlines <= rows:
@@ -1121,6 +1142,11 @@ def reader(stdscr, ebook, index, width, y, pctg):
 
     countstring = ""
     svline = "dontsave"
+    if PENDING_KEY is not None:
+        k = PENDING_KEY
+        PENDING_KEY = None
+    else:
+        k = 0 if SEARCHPATTERN is None else ord("/")
     while True:
         if countstring == "":
             count = 1

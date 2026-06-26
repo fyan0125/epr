@@ -159,6 +159,7 @@ Inline translation:
 - Press `T` to toggle inline translation (original text on the left, translation on the right)
 - Translation uses online service, so it requires network access
 - Shows translation progress at the bottom status line while translating
+- Press any key while translating to interrupt; already translated lines stay visible
 
 You can also open/edit options config with:
 
