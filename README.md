@@ -146,6 +146,7 @@ When work mode is on:
 - Press `w` to toggle it during reading
 - A fake terminal activity panel is shown at the bottom
 - Keywords are highlighted in a separate color
+- Even without `--work-keys`, random words are still highlighted
 
 You can customize highlighted keywords:
 

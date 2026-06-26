@@ -62,6 +62,7 @@ import json
 import tempfile
 import shutil
 import subprocess
+import random
 from datetime import datetime
 import xml.etree.ElementTree as ET
 from urllib.parse import unquote
@@ -885,11 +886,22 @@ def reader(stdscr, ebook, index, width, y, pctg):
             pad.addstr(n, 0, i)
 
     # Colorize keywords in work mode to mimic terminal logs while keeping text readable.
-    if WORKMODE and COLORSUPPORT and WORKKEYWORDS:
+    if WORKMODE and COLORSUPPORT:
         for n, line in enumerate(src_lines):
             for kw in WORKKEYWORDS:
                 for m in re.finditer(re.escape(kw), line, re.IGNORECASE):
                     pad.chgat(n, m.start(), len(m.group()), curses.color_pair(4) | curses.A_BOLD)
+
+        # Even without --work-keys, randomly highlight some words for camouflage effect.
+        random_candidates = []
+        for n, line in enumerate(src_lines):
+            for m in re.finditer(r"\b[A-Za-z]{4,}\b", line):
+                random_candidates.append((n, m.start(), len(m.group())))
+        if random_candidates:
+            rng = random.Random("{}:{}:{}".format(chpath, width, totlines))
+            sample_size = min(24, max(8, totlines // 10), len(random_candidates))
+            for n, start, length in rng.sample(random_candidates, sample_size):
+                pad.chgat(n, start, length, curses.color_pair(4) | curses.A_BOLD)
     if index == 0:
         suff = "     End --> "
     elif index == len(contents) - 1:
