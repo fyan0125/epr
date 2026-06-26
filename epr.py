@@ -115,6 +115,8 @@ JUMPLIST = {}
 WORKMODE = False
 WORKKEYWORDS = ["TODO", "FIXME", "URGENT", "ERROR", "BLOCKER", "DEPLOY", "PROD"]
 WORKPANELHEIGHT = 4
+HIGHLIGHT_ATTR = curses.A_BOLD | curses.A_REVERSE
+WORKPANEL_ATTR = curses.A_REVERSE
 
 
 class Epub:
@@ -886,11 +888,11 @@ def reader(stdscr, ebook, index, width, y, pctg):
             pad.addstr(n, 0, i)
 
     # Colorize keywords in work mode to mimic terminal logs while keeping text readable.
-    if WORKMODE and COLORSUPPORT:
+    if WORKMODE:
         for n, line in enumerate(src_lines):
             for kw in WORKKEYWORDS:
                 for m in re.finditer(re.escape(kw), line, re.IGNORECASE):
-                    pad.chgat(n, m.start(), len(m.group()), curses.color_pair(4) | curses.A_BOLD)
+                    pad.chgat(n, m.start(), len(m.group()), HIGHLIGHT_ATTR)
 
         # Even without --work-keys, randomly highlight some words for camouflage effect.
         random_candidates = []
@@ -901,7 +903,7 @@ def reader(stdscr, ebook, index, width, y, pctg):
             rng = random.Random("{}:{}:{}".format(chpath, width, totlines))
             sample_size = min(24, max(8, totlines // 10), len(random_candidates))
             for n, start, length in rng.sample(random_candidates, sample_size):
-                pad.chgat(n, start, length, curses.color_pair(4) | curses.A_BOLD)
+                pad.chgat(n, start, length, HIGHLIGHT_ATTR)
     if index == 0:
         suff = "     End --> "
     elif index == len(contents) - 1:
@@ -928,12 +930,12 @@ def reader(stdscr, ebook, index, width, y, pctg):
         ]
         for i in range(WORKPANELHEIGHT):
             try:
-                stdscr.addstr(panel_top + i, 0, " " * cols, curses.color_pair(5))
+                stdscr.addstr(panel_top + i, 0, " " * cols, WORKPANEL_ATTR)
             except curses.error:
                 pass
         for i, line in enumerate(fake_lines):
             try:
-                stdscr.addstr(panel_top + i, 0, line[:cols-1], curses.color_pair(5))
+                stdscr.addstr(panel_top + i, 0, line[:cols-1], WORKPANEL_ATTR)
             except curses.error:
                 pass
 
@@ -1181,8 +1183,9 @@ def reader(stdscr, ebook, index, width, y, pctg):
 
 
 def preread(stdscr, file):
-    global COLORSUPPORT
+    global COLORSUPPORT, HIGHLIGHT_ATTR, WORKPANEL_ATTR
 
+    curses.start_color()
     curses.use_default_colors()
     try:
         curses.init_pair(1, -1, -1)
@@ -1191,8 +1194,12 @@ def preread(stdscr, file):
         curses.init_pair(4, 203, -1)
         curses.init_pair(5, 250, 238)
         COLORSUPPORT = True
+        HIGHLIGHT_ATTR = curses.color_pair(4) | curses.A_BOLD
+        WORKPANEL_ATTR = curses.color_pair(5)
     except:
         COLORSUPPORT  = False
+        HIGHLIGHT_ATTR = curses.A_BOLD | curses.A_REVERSE
+        WORKPANEL_ATTR = curses.A_REVERSE
 
     stdscr.keypad(True)
     curses.curs_set(0)
