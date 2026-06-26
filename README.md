@@ -154,6 +154,11 @@ You can customize highlighted keywords:
 $ epr --work --work-keys=todo,urgent,deploy,prod,error book.epub
 ```
 
+Inline translation:
+
+- Press `T` to toggle inline translation (original text on the left, translation on the right)
+- Translation uses online service, so it requires network access
+
 You can also open/edit options config with:
 
 ```shell

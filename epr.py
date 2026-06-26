@@ -43,6 +43,7 @@ Key Binding:
     Jump to pos n    : `[n]
     Switch colorsch  : [default=0, dark=1, light=2]c
     Toggle work mode : w
+    Toggle translate : T
 """
 
 
@@ -64,6 +65,8 @@ import tempfile
 import shutil
 import subprocess
 import random
+import urllib.parse
+import urllib.request
 from datetime import datetime
 import xml.etree.ElementTree as ET
 from urllib.parse import unquote
@@ -96,6 +99,7 @@ HELP = {ord("?")}
 MARKPOS = ord("b")
 JUMPTOPOS = ord("`")
 COLORSWITCH = ord("c")
+TRANSLATE_TOGGLE = ord("T")
 
 
 # colorscheme
@@ -118,6 +122,8 @@ WORKKEYWORDS = ["TODO", "FIXME", "URGENT", "ERROR", "BLOCKER", "DEPLOY", "PROD"]
 WORKPANELHEIGHT = 4
 HIGHLIGHT_ATTR = curses.A_BOLD | curses.A_REVERSE
 WORKPANEL_ATTR = curses.A_REVERSE
+TRANSLATE_MODE = False
+TRANSLATE_CACHE = {}
 OPTIONSCONFIG = ""
 OPTIONS = {
     "colors": {
@@ -433,6 +439,70 @@ def open_options_editor():
         else:
             editor_cmd = ["vi", OPTIONSCONFIG]
     subprocess.call(editor_cmd)
+
+
+def _translate_one(text, target="zh-TW", source="auto"):
+    query = [
+        ("client", "gtx"),
+        ("sl", source),
+        ("tl", target),
+        ("dt", "t"),
+        ("q", text)
+    ]
+    url = "https://translate.googleapis.com/translate_a/single?" + urllib.parse.urlencode(query)
+    req = urllib.request.Request(url, headers={"User-Agent": "epr-reader"})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, list) or not isinstance(data[0], list):
+        raise ValueError("invalid translation response")
+    translated = ""
+    for row in data[0]:
+        if isinstance(row, list) and len(row) >= 1:
+            translated += row[0] if row[0] is not None else ""
+    return translated
+
+
+def translate_lines_cached(lines):
+    trans = []
+    for i in lines:
+        key = i.strip()
+        if key == "" or re.search(r"\[IMG:[0-9]+\]", i):
+            trans.append("")
+        elif key in TRANSLATE_CACHE:
+            trans.append(TRANSLATE_CACHE[key])
+        else:
+            trans.append(None)
+
+    missing_idx = [n for n, i in enumerate(trans) if i is None]
+    for start in range(0, len(missing_idx), 20):
+        idx_chunk = missing_idx[start:start+20]
+        src_chunk = [lines[i].strip() for i in idx_chunk]
+        for j, source in enumerate(src_chunk):
+            try:
+                txt = _translate_one(source)
+            except Exception:
+                txt = "<translation unavailable>"
+            line_key = lines[idx_chunk[j]].strip()
+            TRANSLATE_CACHE[line_key] = txt
+            trans[idx_chunk[j]] = txt
+
+    return [i if i is not None else "" for i in trans]
+
+
+def build_display_lines(src_lines, width):
+    if not TRANSLATE_MODE or width < 40:
+        return src_lines
+    col = (width - 3) // 2
+    translated = translate_lines_cached(src_lines)
+    display = []
+    for left, right in zip(src_lines, translated):
+        if left.strip() == "":
+            display.append("")
+            continue
+        ltxt = left[:col].ljust(col)
+        rtxt = right[:col]
+        display.append(ltxt + " | " + rtxt)
+    return display
 
 
 def savestate(file, index, width, pos, pctg ):
@@ -915,7 +985,7 @@ def searching(stdscr, pad, src, width, y, ch, tot):
 
 
 def reader(stdscr, ebook, index, width, y, pctg):
-    global WORKMODE
+    global WORKMODE, TRANSLATE_MODE
     k = 0 if SEARCHPATTERN is None else ord("/")
     rows, cols = stdscr.getmaxyx()
     x = (cols - width) // 2
@@ -933,7 +1003,9 @@ def reader(stdscr, ebook, index, width, y, pctg):
     except:
         pass
 
-    src_lines, imgs = parser.get_lines(width)
+    text_width = width if not TRANSLATE_MODE or width < 40 else (width - 3) // 2
+    src_lines, imgs = parser.get_lines(text_width)
+    display_lines = build_display_lines(src_lines, width)
     totlines = len(src_lines)
 
     if y < 0 and totlines <= rows:
@@ -949,7 +1021,7 @@ def reader(stdscr, ebook, index, width, y, pctg):
         pad.bkgd(stdscr.getbkgd())
 
     pad.keypad(True)
-    for n, i in enumerate(src_lines):
+    for n, i in enumerate(display_lines):
         if re.search(r"\[IMG:[0-9]+\]", i):
             pad.addstr(n, width//2 - len(i)//2, i, curses.A_REVERSE)
         else:
@@ -1213,6 +1285,9 @@ def reader(stdscr, ebook, index, width, y, pctg):
                 return 0, width, y, None
             elif k == ord("w"):
                 WORKMODE = not WORKMODE
+                return 0, width, y, None
+            elif k == TRANSLATE_TOGGLE:
+                TRANSLATE_MODE = not TRANSLATE_MODE
                 return 0, width, y, None
             elif k == curses.KEY_RESIZE:
                 savestate(ebook.path, index, width, y, y/totlines)
